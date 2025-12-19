@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 import json
+import time 
 
 # Load config.json
 with open("/home/asadel/ASADEL PROJECTS/Fall_Detection/main/config.json", "r") as f:
@@ -9,6 +10,7 @@ with open("/home/asadel/ASADEL PROJECTS/Fall_Detection/main/config.json", "r") a
 # Paths
 N = config["params"]["frames_per_velocity"]  
 M = config["params"]["velocity_history_length"]
+memory_frames = N * M
 
 height_drop_ratio = config["thresholds"]["bbox"]["height_drop_ratio"]
 width_increase_ratio = config["thresholds"]["bbox"]["width_increase_ratio"]
@@ -18,16 +20,14 @@ height_drop_kp = config["thresholds"]["keypoint"]["height_drop"]
 head_inversion_threshold = config["thresholds"]["posture"]["head_inversion_threshold"]
 
 # NEW: Fall velocity thresholds
-MIN_FALL_SPEED = 50  # pixels/second - minimum downward speed
-MIN_FALL_ACCELERATION = 20  # pixels/second² - minimum acceleration
-CONFIRMATION_FRAMES = 5  # Number of consecutive frames to confirm fall
+MIN_FALL_SPEED = config['params']['min_fall_speed']  # pixels/second - minimum downward speed
+CONFIRMATION_FRAMES = config["params"]["confirmation_frames"]  # Number of consecutive frames to confirm fall
+ALERT_RESET_SECONDS = config["alert"]["alert_reset_second"]
 
-fall_memory = {}   # memory per person
-
-def debug_velocity(person_id, feats, vel_list, frame_count, fps, N, M):
+def debug_velocity(camera_id, camera_name, person_id, feats, vel_list, frame_count, fps, N, M):
     """Simplified debug function"""
     print("\n" + "="*60)
-    print(f"DEBUG for Person {person_id} - Frame {frame_count}")
+    print(f"DEBUG for Camera {camera_id}:{camera_name} Person {person_id} - Frame {frame_count}")
     print("="*60)
     
     # 1. Frame timing
@@ -52,14 +52,12 @@ def debug_velocity(person_id, feats, vel_list, frame_count, fps, N, M):
             
             avg_vel = np.mean(recent_vels)
             max_vel = max(recent_vels)
-            acceleration = recent_vels[-1] - recent_vels[0] if len(recent_vels) > 1 else 0
-            
+
             print(f"   Average velocity: {avg_vel:.1f} px/s")
             print(f"   Max velocity: {max_vel:.1f} px/s")
-            print(f"   Acceleration: {acceleration:.1f} px/s²")
             print(f"   Rapid downward: {avg_vel > MIN_FALL_SPEED and max_vel > MIN_FALL_SPEED}")
     else:
-        print("   No velocities stored yet")
+        print("No velocities stored yet")
                     
     print("="*60 + "\n")
 
@@ -97,7 +95,7 @@ def compute_features(kpts, box):
         "bbox_cy": bbox_cy
     }
 
-def check_rapid_downward_movement(velocities, min_speed=MIN_FALL_SPEED, min_accel=MIN_FALL_ACCELERATION):
+def check_rapid_downward_movement(velocities, min_speed=MIN_FALL_SPEED):
     """
     Check if velocities indicate falling (rapid downward movement with acceleration)
     
@@ -123,19 +121,14 @@ def check_rapid_downward_movement(velocities, min_speed=MIN_FALL_SPEED, min_acce
     avg_velocity = np.mean(recent_vels)
     max_velocity = max(recent_vels)
     
-    # Check if accelerating (velocity increasing over time)
-    acceleration = recent_vels[-1] - recent_vels[0]
-    
     # Fall criteria: fast downward movement
     is_fast_enough = avg_velocity > min_speed and max_velocity > min_speed
-    is_accelerating = acceleration > min_accel or max_velocity > min_speed * 1.5
     
-    return is_fast_enough and is_accelerating
+    return is_fast_enough 
 
-memory_frames = N * M
 
-def fall_rule_based(person_id, kpts, box, fps):
-    global fall_memory
+
+def fall_rule_based(person_id, kpts, box, fps, fall_memory, camera_id=None, camera_name=None):
 
     feat = compute_features(kpts, box)
 
@@ -145,7 +138,8 @@ def fall_rule_based(person_id, kpts, box, fps):
             "vel": deque(maxlen=M),
             "frame_count": 0,
             "fall_frames": 0,  # Count consecutive fall detections
-            "alert_sent": False  # Track if alert already sent
+            "alert_sent": False,  # Track if alert already sent
+            "alert_time":0
         }
 
     fall_memory[person_id]["frame_count"] += 1
@@ -155,7 +149,7 @@ def fall_rule_based(person_id, kpts, box, fps):
     feats = list(fall_memory[person_id]["frames"])
 
     if len(feats) < N+1:
-        return "NORMAL"
+        return "NORMAL", False
     
     # ------------------------------------------------------------
     # 1. VELOCITY COMPUTATION (every N frames)
@@ -167,20 +161,18 @@ def fall_rule_based(person_id, kpts, box, fps):
         velocity = (new_y - old_y) / (N / fps)
         
         fall_memory[person_id]["vel"].append(velocity)
-        
-        # DEBUG: Print when velocity is computed
-        if person_id == 0:
-            print(f"\n[VELOCITY COMPUTED AT FRAME {frame_count}]")
-            print(f"  Old Y: {old_y:.1f}, New Y: {new_y:.1f}")
-            print(f"  Change: {new_y - old_y:.1f} pixels")
-            print(f"  Velocity: {velocity:.1f} px/s ({'DOWNWARD' if velocity > 0 else 'UPWARD'})")
-    
+
+        print(f"\n[VELOCITY COMPUTED AT FRAME {frame_count}]")
+        print(f"  Old Y: {old_y:.1f}, New Y: {new_y:.1f}")
+        print(f"  Change: {new_y - old_y:.1f} pixels")
+        print(f"  Velocity: {velocity:.1f} px/s ({'DOWNWARD' if velocity > 0 else 'UPWARD'})")
+
     # ------------------------------------------------------------
     # 2. DEBUG PRINT (with updated velocities)
     # ------------------------------------------------------------
     if frame_count % N == 0:
         vel_list = list(fall_memory[person_id]["vel"])
-        debug_velocity(person_id, feats, vel_list, frame_count, fps, N, M)
+        debug_velocity(camera_id, camera_name, person_id, feats, vel_list, frame_count, fps, N, M)
     
     # ------------------------------------------------------------
     # 3. CHECK VELOCITY FOR RAPID DOWNWARD MOVEMENT
@@ -221,16 +213,10 @@ def fall_rule_based(person_id, kpts, box, fps):
         height_drop = (heights[-5] - heights[-1]) / max(1, heights[-5])
         rapid_height_loss = height_drop > height_drop_kp
     
-    # Check if person is bent/horizontal
-    if len(angles) >= 5:
-        avg_angle = np.mean(angles[-5:])
-        bent_posture = avg_angle > bent_angle
     
     # Check if head is below feet (inverted posture)
     # head_vs_ankle is negative when standing, positive when head below ankles
     head_inversion = curr_feat["head_vs_ankle"] > 0
-    
-    keypoint_fall = rapid_height_loss or head_inversion or bent_posture
     
     # ------------------------------------------------------------
     # 6. FALL DECISION - MULTI-CRITERIA WITH CONFIRMATION
@@ -249,9 +235,6 @@ def fall_rule_based(person_id, kpts, box, fps):
     if head_inversion:
         other_indicators.append("head_inversion")
 
-    if bent_posture:
-        other_indicators.append("bent_posture")
-
     # 2. Apply new rule: velocity is mandatory
     fall_indicators = 0
     indicators_detail = []
@@ -266,6 +249,7 @@ def fall_rule_based(person_id, kpts, box, fps):
         fall_indicators += 1
         indicators_detail.extend(other_indicators)
     
+    alert_triggered = False
     
     # CORRECTED LOGIC: Require at least 2 indicators for potential fall
     if fall_indicators >= 2:
@@ -273,18 +257,32 @@ def fall_rule_based(person_id, kpts, box, fps):
         
         # Confirm fall only after consecutive detections
         if fall_memory[person_id]["fall_frames"] >= CONFIRMATION_FRAMES:
-            if not fall_memory[person_id]["alert_sent"]:
+            current_time = time.time()
+            if (not fall_memory[person_id]["alert_sent"] or
+                (current_time - fall_memory[person_id]["alert_time"] > ALERT_RESET_SECONDS)):
+                
                 fall_memory[person_id]["alert_sent"] = True
+                fall_memory[person_id]["alert_time"] = current_time
+                
+                alert_triggered = True
+                
                 print(f"\n{'='*60}")
                 print(f"  FALL CONFIRMED for Person {person_id}!")
                 print(f"   Indicators: {indicators_detail}")
                 print(f"   Confirmed over {fall_memory[person_id]['fall_frames']} frames")
                 print(f"{'='*60}\n")
-            return "FALLING"
+            return "FALLING", alert_triggered
         else:
-            return "POTENTIAL_FALL"
+            return "POTENTIAL_FALL", False
     else:
-        # Reset fall counter if conditions not met
+        if fall_memory[person_id]["alert_sent"]:
+            if time.time() - fall_memory[person_id]["alert_time"] > ALERT_RESET_SECONDS:
+                fall_memory[person_id]["alert_sent"] = False
+
         fall_memory[person_id]["fall_frames"] = 0
-        fall_memory[person_id]["alert_sent"] = False
-        return "NORMAL"
+        return "NORMAL", False
+    
+
+
+
+    

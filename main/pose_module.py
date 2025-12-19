@@ -8,7 +8,9 @@ import json
 with open("/home/asadel/ASADEL PROJECTS/Fall_Detection/main/config.json", "r") as f:
     config = json.load(f)
 
-conf = config["params"]["conf"]
+conf = config["params"]["person_conf_threshold"]
+keypoint_conf = config["params"]["keypoint_conf_threshold"]
+min_visible_kpts = config["params"]["min_visible_keypoints"]
 
 
 class PoseEstimator:
@@ -40,63 +42,86 @@ class PoseEstimator:
 
     def process_frame(self, frame):
         """Run pose estimation with ByteTrack and return results for each person"""
-        # Use track() method with ByteTrack tracker
+
         results = self.model.track(
-            frame, 
-            persist=True,  # Persist tracks between frames
-            tracker='bytetrack.yaml',  # Use ByteTrack tracker
-            conf=conf, 
-            classes=[0]  # Person class only
+            frame,
+            persist=True,
+            tracker='bytetrack.yaml',
+            conf=conf,
+            classes=[0]
         )
-        
+
         output = []
 
         for r in results:
             boxes = r.boxes
-            keypoints_list = r.keypoints.xy
+            kpts_xy = r.keypoints.xy
+            kpts_conf = r.keypoints.conf
 
-            # Check if tracking IDs are available
             if boxes.id is None:
                 continue
 
-            for box, kpts in zip(boxes, keypoints_list):
+            for box, kpts, confs in zip(boxes, kpts_xy, kpts_conf):
                 bbox = box.xyxy[0].cpu().numpy()
                 kpts_array = kpts.cpu().numpy()
-                
-                # Get tracking ID from ByteTrack
+                conf_array = confs.cpu().numpy()
+
                 person_id = int(box.id.cpu().numpy()[0])
 
-                # Kalman smoothing for keypoints
+                # -------------------------------
+                # Filter by confidence
+                # -------------------------------
+                visible_mask = conf_array > keypoint_conf
+                visible_count = np.sum(visible_mask)
+
+                if visible_count < min_visible_kpts:
+                    continue  # skip unreliable pose
+
+                # -------------------------------
+                # Init Kalman (once per ID)
+                # -------------------------------
                 if person_id not in self.kalman_filters:
-                    self.kalman_filters[person_id] = [self.create_kf(x, y) for x, y in kpts_array]
+                    self.kalman_filters[person_id] = [
+                        self.create_kf(x, y) for x, y in kpts_array
+                    ]
 
-                # Ensure kalman filters match keypoints count
-                if len(self.kalman_filters[person_id]) != len(kpts_array):
-                    self.kalman_filters[person_id] = [self.create_kf(x, y) for x, y in kpts_array]
-
+                # -------------------------------
+                # Kalman update (NO RESET)
+                # -------------------------------
                 smooth_kpts = []
-                for kf, (x, y) in zip(self.kalman_filters[person_id], kpts_array):
+
+                for i, (kf, (x, y)) in enumerate(
+                    zip(self.kalman_filters[person_id], kpts_array)
+                ):
                     kf.predict()
-                    kf.update([x, y])
+
+                    if visible_mask[i]:
+                        kf.update([x, y])
+
                     smooth_kpts.append((kf.x[0], kf.x[1]))
 
-                # Draw visuals
+                # -------------------------------
+                # Drawing
+                # -------------------------------
                 x1, y1, x2, y2 = map(int, bbox)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                cv2.putText(frame, f"ID: {person_id}", (x1, y1-10),
+                cv2.putText(frame, f"ID: {person_id}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-                # Draw keypoints
-                for sx, sy in smooth_kpts:
-                    cv2.circle(frame, (int(sx), int(sy)), 3, (0, 255, 0), -1)
+                for i, (sx, sy) in enumerate(smooth_kpts):
+                    if visible_mask[i]:   # draw ONLY high-confidence keypoints
+                        cv2.circle(frame, (int(sx), int(sy)), 3, (0, 255, 0), -1)
 
-                # Draw skeleton
+
                 for i, j in self.skeleton:
-                    if i < len(smooth_kpts) and j < len(smooth_kpts):
+                    if visible_mask[i] and visible_mask[j]:
                         x1_s, y1_s = smooth_kpts[i]
                         x2_s, y2_s = smooth_kpts[j]
-                        cv2.line(frame, (int(x1_s), int(y1_s)), (int(x2_s), int(y2_s)), (0, 0, 255), 2)
+                        cv2.line(frame,
+                                (int(x1_s), int(y1_s)),
+                                (int(x2_s), int(y2_s)),
+                                (0, 0, 255), 2)
 
                 output.append((person_id, smooth_kpts, bbox))
-                
+
         return frame, output

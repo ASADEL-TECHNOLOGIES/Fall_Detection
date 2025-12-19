@@ -2,23 +2,33 @@
   "params": {
     
     "model_path": "/home/asadel/ASADEL PROJECTS/Fall_Detection/yolo11m-pose.pt",
-    "video_path" : "/home/asadel/ASADEL PROJECTS/Fall_Detection/video/14.mp4",
     "default_fps": 20,
-    "conf" : 0.5,
+    "person_conf_threshold" : 0.5,
     "frame_skip" : 1,
     "frames_per_velocity": 5,
-    "velocity_history_length": 3
+    "velocity_history_length": 3,
+
+    "min_fall_speed": 50,
+    "confirmation_frames": 5,
+
+    "keypoint_conf_threshold": 0.5,
+    "min_visible_keypoints":10
     
+  },
+  "alert":{
+    "alert_reset_second":5,
+    "clip_before_seconds":1,
+    "clip_after_seconds":1.5
   },
   
   
   
   "thresholds": {
       "bbox": {
-          "height_drop_ratio": 0.8,
+          "height_drop_ratio": 0.5,
           "height_drop_ratio_desc": "20% height drop , If current bbox height becomes less than 80% of previous height → person is collapsing vertically",
 
-          "width_increase_ratio": 1.2,
+          "width_increase_ratio": 1.5,
           "width_increase_ratio_desc": "If current bbox width becomes 20% wider than previous width → person is turning horizontal"
       },
 
@@ -40,9 +50,14 @@
           "head_inversion_threshold": 0,
           "head_inversion_threshold_desc": "If head_y - ankle_y becomes > 0 → head is below ankle (abnormal fall posture)"
       }
-}
+    },
 
-
-  
+  "database": {
+        "host": "127.0.0.1",
+        "username": "root",
+        "password": "Asadel@123",
+        "port": 3306,
+        "db": "Dalmia"
+    }
 
 }
