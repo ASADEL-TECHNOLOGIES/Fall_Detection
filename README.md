@@ -90,8 +90,8 @@ Debug logs clearly indicate transitions between these states.
 * Frames are buffered using a **time-based deque**
 * On fall confirmation:
 
-  * Last `N` seconds are taken from buffer (before fall)
-  * Next `M` seconds are recorded live (after fall)
+  * Last `X` seconds are taken from buffer (before fall)
+  * Next `Y` seconds are recorded live (after fall)
 * Resulting clip is **raw video only** (no bounding boxes or keypoints)
 
 This avoids blocking the live feed and ensures smooth playback.
