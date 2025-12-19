@@ -57,8 +57,14 @@ Fall_Detection/
 
 ---
 
-## ⚙️ Configuration (config.json)
+⚙️ Configuration (config.json)
 
+The system is fully config-driven. All database credentials, model paths, alert timings, and fall detection thresholds are controlled via config.json.
+
+1️⃣ Parameters Section
+2️⃣ Alert Configuration
+3️⃣ Fall Detection Thresholds
+4️⃣ Database Configuration
 ---
 
 ## 🧠 Fall Detection Logic
@@ -92,32 +98,19 @@ This avoids blocking the live feed and ensures smooth playback.
 
 ---
 
-## 🗄 Database Schema (Alerts Table)
-
-```sql
-CREATE TABLE Alerts (
-    AlertId VARCHAR(255) PRIMARY KEY,
-    CameraId VARCHAR(255),
-    Analytics VARCHAR(100),
-    AlertType VARCHAR(100),
-    Image1 LONGTEXT,   -- Base64 snapshot
-    Image2 LONGTEXT,   -- Video clip path
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
----
-
 ## ▶️ How to Run
 
-1. Activate virtual environment
+1. Create virtual environment
+```bash
+python3 -m venv venv
+```
 
+2. Activate virtual environment
 ```bash
 source venv/bin/activate
 ```
 
-2. Start the system
-
+3. Start the system
 ```bash
 python main/main.py
 ```
@@ -135,8 +128,6 @@ Each active camera from the database will start in its own process.
   * FALL CONFIRMED
 * Frame buffer size visibility
 
-> Note: `print(..., flush=True)` can be used to force immediate terminal output in multiprocessing.
-
 ---
 
 ## 🛑 Graceful Shutdown
@@ -146,24 +137,3 @@ Each active camera from the database will start in its own process.
 
 ---
 
-## 🔮 Future Improvements
-
-* Async DB inserts
-* Event cooldown per person
-* GPU acceleration (DeepStream / TensorRT)
-* Alert dashboard (FastAPI)
-* Cloud storage for clips
-
----
-
-## 👤 Author
-
-Developed by **Adeeba**
-
-Computer Vision | Real-Time Analytics | AI Surveillance
-
----
-
-## 📄 License
-
-Internal / Proprietary
