@@ -15,10 +15,16 @@
     "min_visible_keypoints":10
     
   },
+  
   "alert":{
     "alert_reset_second":5,
+    "alert_reset_second_desc":"After how many seconds of no fall detection, alert state is reset",
+
     "clip_before_seconds":1,
-    "clip_after_seconds":1.5
+    "clip_before_seconds_desc":"Seconds of video to include before fall event",
+
+    "clip_after_seconds":1.5,
+    "clip_after_seconds_desc":"Seconds of video to include after fall event"
   },
   
   
